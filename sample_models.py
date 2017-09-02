@@ -1,7 +1,8 @@
 from keras import backend as K
 from keras.models import Model
-from keras.layers import (BatchNormalization, Conv1D, Dense, Input, 
-    TimeDistributed, Activation, Bidirectional, SimpleRNN, GRU, LSTM)
+from keras.layers import (BatchNormalization, Conv1D, Dense, Input,
+                          TimeDistributed, Activation, Bidirectional, SimpleRNN, GRU, LSTM, Merge, MaxPooling1D,
+                          Maximum)
 
 def simple_rnn_model(input_dim, output_dim=29):
     """ Build a recurrent network for speech 
@@ -55,7 +56,7 @@ def cnn_rnn_model(input_dim, filters, kernel_size, conv_stride,
     # Add batch normalization
     bn_cnn = BatchNormalization(name='bn_conv_1d')(conv_1d)
     # Add a recurrent layer
-    simp_rnn = SimpleRNN(units, activation='relu',
+    simp_rnn = GRU(units, activation='relu',
         return_sequences=True, implementation=2, name='rnn')(bn_cnn)
     # TODO: Add batch normalization
     bn_rnn = BatchNormalization()(simp_rnn)
@@ -131,18 +132,54 @@ def bidirectional_rnn_model(input_dim, units, output_dim=29):
     print(model.summary())
     return model
 
-def final_model(input_dim):
+def final_model(input_dim, cnn_layer, filters, kernel_size, conv_stride,
+                conv_border_mode, cnn_pool_size, cnn_dilation_rate,
+                rnn_layer, rnn_units, rnn_dropout, rnn_recurrent_dropout,
+                output_dim=29):
     """ Build a deep network for speech 
     """
     # Main acoustic input
     input_data = Input(name='the_input', shape=(None, input_dim))
     # TODO: Specify the layers in your network
-    ...
+    maxout = input_data
+    for i in range(cnn_layer):
+        conv_1d_1 = Conv1D(filters, kernel_size,
+                     strides=conv_stride,
+                     padding=conv_border_mode,
+                     dilation_rate=cnn_dilation_rate,
+                     activation='relu',
+                     name='conv1d_1_layer{}'.format(i))(maxout)
+
+        conv_1d_2 =  Conv1D(filters, kernel_size,
+                     strides=conv_stride,
+                     padding=conv_border_mode,
+                     dilation_rate=cnn_dilation_rate,
+                     activation='relu',
+                     name='conv1d_2_layer{}'.format(i))(maxout)
+
+        # maxout
+        maxout = Maximum()([conv_1d_1, conv_1d_2])
+
+        if i == 0:
+            maxout = MaxPooling1D(pool_size=cnn_pool_size)(maxout)
+
+    bn = maxout
+    for i in range(rnn_layer):
+        bidir_rnn = Bidirectional(LSTM(rnn_units, return_sequences=True,
+                                      implementation=2,
+                                       name="bidirectional_rnn_layer{}".format(i),
+                                       dropout=rnn_dropout,
+                                       recurrent_dropout=rnn_recurrent_dropout
+                                       ))(bn)
+        bn = BatchNormalization()(bidir_rnn)
+
+    time_dense = TimeDistributed(Dense(output_dim))(bn)
     # TODO: Add softmax activation layer
-    y_pred = ...
+    y_pred = Activation('softmax', name='softmax')(time_dense)
     # Specify the model
     model = Model(inputs=input_data, outputs=y_pred)
     # TODO: Specify model.output_length
-    model.output_length = ...
+    model.output_length = lambda x: cnn_output_length(
+        x, kernel_size, conv_border_mode, conv_stride, dilation=cnn_dilation_rate)
     print(model.summary())
     return model
