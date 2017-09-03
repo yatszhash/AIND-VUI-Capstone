@@ -2,7 +2,7 @@ from keras import backend as K
 from keras.models import Model
 from keras.layers import (BatchNormalization, Conv1D, Dense, Input,
                           TimeDistributed, Activation, Bidirectional, SimpleRNN, GRU, LSTM, Merge, MaxPooling1D,
-                          Maximum)
+                          Maximum, Add)
 
 def simple_rnn_model(input_dim, output_dim=29):
     """ Build a recurrent network for speech 
@@ -10,7 +10,7 @@ def simple_rnn_model(input_dim, output_dim=29):
     # Main acoustic input
     input_data = Input(name='the_input', shape=(None, input_dim))
     # Add recurrent layer
-    simp_rnn = GRU(output_dim, return_sequences=True, 
+    simp_rnn = LSTM(output_dim, return_sequences=True, 
                  implementation=2, name='rnn')(input_data)
     # Add softmax activation layer
     y_pred = Activation('softmax', name='softmax')(simp_rnn)
@@ -132,45 +132,58 @@ def bidirectional_rnn_model(input_dim, units, output_dim=29):
     print(model.summary())
     return model
 
+
 def final_model(input_dim, cnn_layer, filters, kernel_size, conv_stride,
                 conv_border_mode, cnn_pool_size, cnn_dilation_rate,
                 rnn_layer, rnn_units, rnn_dropout, rnn_recurrent_dropout,
                 output_dim=29):
     """ Build a deep network for speech 
     """
-    # Main acoustic input
-    input_data = Input(name='the_input', shape=(None, input_dim))
     # TODO: Specify the layers in your network
-    maxout = input_data
-    for i in range(cnn_layer):
-        conv_1d_1 = Conv1D(filters, kernel_size,
-                     strides=conv_stride,
-                     padding=conv_border_mode,
-                     dilation_rate=cnn_dilation_rate,
-                     activation='relu',
-                     name='conv1d_1_layer{}'.format(i))(maxout)
+    # Main acoustic input
+    dnece_cnn = lambda x: Conv1D(x.filters[1])
+    maxout_function = lambda x: Maximum()([Dense(K.int_shape(x)[2])(x), Dense(K.int_shape(x)[2])(x)])
 
-        conv_1d_2 =  Conv1D(filters, kernel_size,
-                     strides=conv_stride,
-                     padding=conv_border_mode,
-                     dilation_rate=cnn_dilation_rate,
-                     activation='relu',
-                     name='conv1d_2_layer{}'.format(i))(maxout)
+    input_data = Input(name='the_input', shape=(None, input_dim))
+    initial_conv_1d = Conv1D(filters, kernel_size,
+                             strides=conv_stride,
+                             padding=conv_border_mode,
+                             dilation_rate=1,
+                             name='conv1d_initial_layer')(input_data)
+
+    #print(K.int_shape(initial_conv_1d))
+    # initial_maxout = maxout_function(initial_conv_1d)
+
+    maxout = initial_conv_1d
+    # maxout = initial_maxout
+    for i in range(cnn_layer):
+
+        original_input = maxout
+
+        conv_1d = Conv1D(filters, kernel_size,
+                         strides=conv_stride,
+                         padding=conv_border_mode,
+                         dilation_rate=2 ** i,
+                         name='res_conv1d_layer{}'.format(i))(original_input)
+
+        maxout = conv_1d
+        # res
+        # res = Add()([conv_1d, original_input])
 
         # maxout
-        maxout = Maximum()([conv_1d_1, conv_1d_2])
-
-        if i == 0:
-            maxout = MaxPooling1D(pool_size=cnn_pool_size)(maxout)
+        # maxout = maxout_function(res)
+        # maxout = maxout_function(conv_1d)
+        # if i == 0:
+        maxout = MaxPooling1D(pool_size=cnn_pool_size)(maxout)
 
     bn = maxout
     for i in range(rnn_layer):
-        bidir_rnn = Bidirectional(LSTM(rnn_units, return_sequences=True,
+        bidir_rnn = Bidirectional(GRU(rnn_units, return_sequences=True,
                                       implementation=2,
-                                       name="bidirectional_rnn_layer{}".format(i),
-                                       dropout=rnn_dropout,
-                                       recurrent_dropout=rnn_recurrent_dropout
-                                       ))(bn)
+                                      name="bidirectional_rnn_layer{}".format(i),
+                                      dropout=rnn_dropout,
+                                      recurrent_dropout=rnn_recurrent_dropout
+                                      ))(bn)
         bn = BatchNormalization()(bidir_rnn)
 
     time_dense = TimeDistributed(Dense(output_dim))(bn)
