@@ -10,22 +10,6 @@ def simple_rnn_model(input_dim, output_dim=29):
     # Main acoustic input
     input_data = Input(name='the_input', shape=(None, input_dim))
     # Add recurrent layer
-    simp_rnn = LSTM(output_dim, return_sequences=True, 
-                 implementation=2, name='rnn')(input_data)
-    # Add softmax activation layer
-    y_pred = Activation('softmax', name='softmax')(simp_rnn)
-    # Specify the modelfrom keras import backend as K
-from keras.models import Model
-from keras.layers import (BatchNormalization, Conv1D, Dense, Input,
-                          TimeDistributed, Activation, Bidirectional, SimpleRNN, GRU, LSTM, Merge, MaxPooling1D,
-                          Maximum, Add)
-
-def simple_rnn_model(input_dim, output_dim=29):
-    """ Build a recurrent network for speech 
-    """
-    # Main acoustic input
-    input_data = Input(name='the_input', shape=(None, input_dim))
-    # Add recurrent layer
     simp_rnn = GRU(output_dim, return_sequences=True, 
                  implementation=2, name='rnn')(input_data)
     # Add softmax activation layer
