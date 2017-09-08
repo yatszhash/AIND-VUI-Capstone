@@ -91,7 +91,8 @@ def cnn_output_length(input_length, filter_size, border_mode, stride,
         output_length = input_length
     elif border_mode == 'valid':
         output_length = input_length - dilated_filter_size + 1
-    return (output_length + stride - 1) // stride
+    l = (output_length + stride - 1) // stride
+    return l
 
 def multi_layer_cnn_output_length(input_length, cnn_shapes):
     in_len = input_length
@@ -171,7 +172,6 @@ def final_model(input_dim, cnn_layer, filters, kernel_size, conv_stride,
                          dilation_rate=2 ** i,
                          name='res_conv1d_layer{}'.format(i))(original_input)
 
-        maxout = conv_1d
         # res
         # res = Add()([conv_1d, original_input])
 
@@ -200,9 +200,9 @@ def final_model(input_dim, cnn_layer, filters, kernel_size, conv_stride,
     # Specify the model
     model = Model(inputs=input_data, outputs=y_pred)
     # TODO: Specify model.output_length
-    #model.output_length = lambda x: cnn_output_length(
-    #    x, kernel_size, conv_border_mode, conv_stride, dilation=cnn_dilation_rate)
-    model.output_length = lambda x: multi_layer_cnn_output_length(x, cnn_shapes)
+    model.output_length = lambda x: cnn_output_length(
+        x, kernel_size, conv_border_mode, conv_stride, dilation=cnn_dilation_rate)
+    # model.output_length = lambda x: multi_layer_cnn_output_length(x, cnn_shapes)
     print(model.summary())
     return model
 
