@@ -101,8 +101,8 @@ def multi_layer_cnn_output_length(input_length, cnn_shapes):
                                     cnn_shape["border_mode"], cnn_shape["stride"],
                                     cnn_shape["dilation"])
 
-
     return in_len
+
 
 def deep_rnn_model(input_dim, units, recur_layers, output_dim=29):
     """ Build a deep recurrent network for speech 
@@ -144,6 +144,7 @@ def bidirectional_rnn_model(input_dim, units, output_dim=29):
     return model
 
 
+# todo remove unused argument
 def final_model(input_dim, cnn_layer, filters, kernel_size, conv_stride,
                 conv_border_mode, cnn_pool_size, cnn_dilation_rate,
                 rnn_layer, rnn_units, rnn_dropout, rnn_recurrent_dropout,
@@ -181,7 +182,7 @@ def final_model(input_dim, cnn_layer, filters, kernel_size, conv_stride,
         # if i == 0:
         #     maxout = MaxPooling1D(pool_size=cnn_pool_size)(maxout)
 
-        cnn_shapes.append({"filter_size": filters, "border_mode": conv_border_mode,
+        cnn_shapes.append({"filter_size": kernel_size, "border_mode": conv_border_mode,
                            "stride": conv_stride, "dilation": 2 ** i})
 
     bn = maxout
@@ -200,9 +201,10 @@ def final_model(input_dim, cnn_layer, filters, kernel_size, conv_stride,
     # Specify the model
     model = Model(inputs=input_data, outputs=y_pred)
     # TODO: Specify model.output_length
-    model.output_length = lambda x: cnn_output_length(
-        x, kernel_size, conv_border_mode, conv_stride, dilation=cnn_dilation_rate)
-    # model.output_length = lambda x: multi_layer_cnn_output_length(x, cnn_shapes)
+    #model.output_length = lambda x: cnn_output_length(
+    #    x, cnn_shapes[0]["filter_size"], cnn_shapes[0]["border_mode"], cnn_shapes[0]["stride"],
+    #    dilation=cnn_shapes[0]["dilation"])
+    model.output_length = lambda x: multi_layer_cnn_output_length(x, cnn_shapes)
     print(model.summary())
     return model
 
@@ -219,9 +221,9 @@ if __name__ == "__main__":
     # import function for training acoustic model
     from train_utils import train_model
 
-    model_end = final_model(input_dim=161, cnn_layer=1, filters=256, kernel_size=11, conv_stride=1,
+    model_end = final_model(input_dim=161, cnn_layer=3, filters=256, kernel_size=11, conv_stride=1,
                             conv_border_mode='valid', cnn_pool_size=2, cnn_dilation_rate=2,
-                            rnn_layer=2, rnn_units=200, rnn_dropout=0.3, rnn_recurrent_dropout=0.3,
+                            rnn_layer=1, rnn_units=200, rnn_dropout=0.3, rnn_recurrent_dropout=0.3,
                             output_dim=29)
     train_model(input_to_softmax=model_end,
                 pickle_path='model_end.pickle',
