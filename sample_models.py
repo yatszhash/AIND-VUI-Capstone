@@ -159,24 +159,17 @@ def final_model(input_dim, cnn_layer, filters, kernel_size, conv_stride,
 
     input_data = Input(name='the_input', shape=(None, input_dim))
 
-    # initial_maxout = maxout_function(initial_conv_1d)
-
-    maxout = input_data
-    # maxout = initial_maxout
+    conv_1d = input_data
     for i in range(0, cnn_layer):
-
-        original_input = maxout
 
         conv_1d = Conv1D(filters, kernel_size,
                          strides=conv_stride,
                          padding=conv_border_mode,
                          dilation_rate=2 ** i,
-                         name='res_conv1d_layer{}'.format(i))(original_input)
+                         name='res_conv1d_layer{}'.format(i))(conv_1d)
 
-        # res
         # res = Add()([conv_1d, original_input])
 
-        # maxout
         # maxout = maxout_function(res)
         # maxout = maxout_function(conv_1d)
         # if i == 0:
@@ -185,7 +178,7 @@ def final_model(input_dim, cnn_layer, filters, kernel_size, conv_stride,
         cnn_shapes.append({"filter_size": kernel_size, "border_mode": conv_border_mode,
                            "stride": conv_stride, "dilation": 2 ** i})
 
-    bn = maxout
+    bn = conv_1d
     for i in range(rnn_layer):
         bidir_rnn = Bidirectional(GRU(rnn_units, return_sequences=True,
                                       implementation=2,
@@ -221,7 +214,7 @@ if __name__ == "__main__":
     # import function for training acoustic model
     from train_utils import train_model
 
-    model_end = final_model(input_dim=161, cnn_layer=3, filters=256, kernel_size=11, conv_stride=1,
+    model_end = final_model(input_dim=161, cnn_layer=3, filters=200, kernel_size=11, conv_stride=1,
                             conv_border_mode='valid', cnn_pool_size=2, cnn_dilation_rate=2,
                             rnn_layer=1, rnn_units=200, rnn_dropout=0.3, rnn_recurrent_dropout=0.3,
                             output_dim=29)
