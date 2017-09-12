@@ -2,7 +2,7 @@ from keras import backend as K
 from keras.models import Model
 from keras.layers import (BatchNormalization, Conv1D, Dense, Input,
                           TimeDistributed, Activation, Bidirectional, SimpleRNN, GRU, LSTM, Merge, MaxPooling1D,
-                          Maximum, Add)
+                          Maximum, Add, Multiply, ZeroPadding3D)
 
 def simple_rnn_model(input_dim, output_dim=29):
     """ Build a recurrent network for speech 
@@ -149,7 +149,7 @@ def final_model(input_dim, cnn_layer, filters, kernel_size, conv_stride,
                 conv_border_mode, cnn_pool_size, cnn_dilation_rate,
                 rnn_layer, rnn_units, rnn_dropout, rnn_recurrent_dropout,
                 output_dim=29):
-    """ Build a deep network for speech 
+    """ Build a deep network for speech
     """
     # TODO: Specify the layers in your network
     # Main acoustic input
@@ -167,13 +167,6 @@ def final_model(input_dim, cnn_layer, filters, kernel_size, conv_stride,
                          padding=conv_border_mode,
                          dilation_rate=2 ** i,
                          name='res_conv1d_layer{}'.format(i))(conv_1d)
-
-        # res = Add()([conv_1d, original_input])
-
-        # maxout = maxout_function(res)
-        # maxout = maxout_function(conv_1d)
-        # if i == 0:
-        #     maxout = MaxPooling1D(pool_size=cnn_pool_size)(maxout)
 
         cnn_shapes.append({"filter_size": kernel_size, "border_mode": conv_border_mode,
                            "stride": conv_stride, "dilation": 2 ** i})
@@ -201,6 +194,95 @@ def final_model(input_dim, cnn_layer, filters, kernel_size, conv_stride,
     print(model.summary())
     return model
 
+def final_model_1(input_dim, cnn_layer, filters, kernel_size, conv_stride,
+                conv_border_mode, cnn_pool_size,
+                rnn_layer, rnn_units, rnn_dropout, rnn_recurrent_dropout,
+                output_dim=29):
+    """ Build a deep network for speech
+    """
+    # dnece_cnn = lambda x: Conv1D(x.filters[1])
+    # maxout_function = lambda x: Maximum()([Dense(K.int_shape(x)[2])(x), Dense(K.int_shape(x)[2])(x)])
+    cnn_shapes = []
+    conv_stride = 1
+    input_data = Input(name='the_input', shape=(None, input_dim))
+
+    conv_1d = Conv1D(filters, 2,
+                     strides=conv_stride,
+                     padding=conv_border_mode,
+                     name='initial_conv1d_layer')(input_data)
+
+    cnn_shapes.append({"filter_size": 2, "border_mode": "valid",
+                       "stride": conv_stride, "dilation": 1})
+
+    skipped = []
+    res = conv_1d
+    for i in range(1, cnn_layer):
+        original = res
+
+        conv_1d = Conv1D(filters, 2,
+                         strides=conv_stride,
+                         padding="same",
+                         dilation_rate=2 ** i,
+                         use_bias=True,
+                         name='res_conv1d_layer{}'.format(i))(res)
+        sigmoid_actitvated = Activation("sigmoid")(conv_1d)
+        tanh_activated = Activation("tanh")(conv_1d)
+
+        merged = Multiply()([sigmoid_actitvated, tanh_activated])
+
+        padded = Conv1D(filters, 1, strides=1, padding="same",
+                        name='padding_layer_{}'.format(i))(merged)
+        skipped.append(padded)
+
+        # pad_shape = ((0, 0),
+        #            (2, 0),
+        #             (0, 0))
+        # padded = ZeroPadding3D(padding=pad_shape)(padded)
+        res = Add()([padded, original])
+
+        # maxout = maxout_function(res)
+        # maxout = maxout_function(conv_1d)
+        # if i == 0:
+        #     maxout = MaxPooling1D(pool_size=cnn_pool_size)(maxout)
+
+        cnn_shapes.append({"filter_size": 2, "border_mode": "same",
+                           "stride": conv_stride, "dilation": 2 ** i})
+
+    merged = Add()(skipped)
+
+    activated = Activation("relu")(merged)
+
+    padded = Conv1D(filters, 1, strides=1, padding="same",
+                    name='padding_layer_')(activated)
+    activated = Activation("relu")(padded)
+
+    cnn_shapes.append({"filter_size": 1, "border_mode": "same",
+                       "stride": conv_stride, "dilation": 1})
+
+    bn = activated
+    for i in range(rnn_layer):
+        bidir_rnn = Bidirectional(GRU(rnn_units, return_sequences=True,
+                                      implementation=2,
+                                      name="bidirectional_rnn_layer{}".format(i),
+                                      dropout=rnn_dropout,
+                                      recurrent_dropout=rnn_recurrent_dropout
+                                      ))(bn)
+        bn = BatchNormalization()(bidir_rnn)
+
+    time_dense = TimeDistributed(Dense(output_dim))(bn)
+    # TODO: Add softmax activation layer
+    y_pred = Activation('softmax', name='softmax')(time_dense)
+    # Specify the model
+    model = Model(inputs=input_data, outputs=y_pred)
+    # TODO: Specify model.output_length
+    #model.output_length = lambda x: cnn_output_length(
+    #    x, cnn_shapes[0]["filter_size"], cnn_shapes[0]["border_mode"], cnn_shapes[0]["stride"],
+    #    dilation=cnn_shapes[0]["dilation"])
+    model.output_length = lambda x: multi_layer_cnn_output_length(x, cnn_shapes)
+    print(model.summary())
+    return model
+
+
 # for debug
 if __name__ == "__main__":
     from keras.backend.tensorflow_backend import set_session
@@ -214,13 +296,13 @@ if __name__ == "__main__":
     # import function for training acoustic model
     from train_utils import train_model
 
-    model_end = final_model(input_dim=161, cnn_layer=3, filters=200, kernel_size=11, conv_stride=1,
-                            conv_border_mode='valid', cnn_pool_size=2, cnn_dilation_rate=2,
+    model_end = final_model_1(input_dim=161, cnn_layer=3, filters=256, kernel_size=11, conv_stride=1,
+                            conv_border_mode='valid', cnn_pool_size=2,
                             rnn_layer=1, rnn_units=200, rnn_dropout=0.3, rnn_recurrent_dropout=0.3,
                             output_dim=29)
     train_model(input_to_softmax=model_end,
                 pickle_path='model_end.pickle',
                 save_model_path='model_end.h5',
-                minibatch_size=20,
+                minibatch_size=40,
                 epochs=20,
                 spectrogram=True)  # change to False if you would like to use MFCC features
