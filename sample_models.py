@@ -2,7 +2,9 @@ from keras import backend as K
 from keras.models import Model
 from keras.layers import (BatchNormalization, Conv1D, Dense, Input,
                           TimeDistributed, Activation, Bidirectional, SimpleRNN, GRU, LSTM, Merge, MaxPooling1D,
-                          Maximum, Add, Multiply, ZeroPadding3D)
+                          Maximum, Add, Multiply, ZeroPadding3D, Dropout)
+from keras.regularizers import l2
+
 
 def simple_rnn_model(input_dim, output_dim=29):
     """ Build a recurrent network for speech 
@@ -361,75 +363,94 @@ def final_model_2(input_dim, cnn_layer, filters, kernel_size, conv_stride,
     print(model.summary())
     return model
 
-def final_model_3(input_dim, cnn_layer, filters, kernel_size, conv_stride,
-                conv_border_mode, cnn_pool_size,
-                rnn_layer, rnn_units, rnn_dropout, rnn_recurrent_dropout,
-                output_dim=29):
+def final_model_3(input_dim, res_layers, res_stack, filters, conv_border_mode,
+                  rnn_layer, rnn_units, rnn_dropout, rnn_recurrent_dropout,
+                  output_dim=29):
     """ Build a deep network for speech
     """
-    cnn_shapes = []
+    filter_size = 2
+    res_conv_w_reg = 1e-7
     conv_stride = 1
+    kernel_initializer = "he_normal"
+
+    def res_dilatted_conv(input, dilation_rate):
+
+        conv_1d = Conv1D(filters, filter_size,
+                         strides=conv_stride,
+                         padding="same",
+                         dilation_rate=dilation_rate,
+                         use_bias=True,
+                         kernel_initializer=kernel_initializer,
+                         kernel_regularizer=l2(res_conv_w_reg)
+                         #name="dilation({})_conv_in_res".format(dilation_rate)
+                         )(input)
+        sigmoid_actitvated = Activation("sigmoid")(conv_1d)
+        tanh_activated = Activation("tanh")(conv_1d)
+
+        merged = Multiply()([sigmoid_actitvated, tanh_activated])
+
+        x = Conv1D(filters,
+                        1,
+                        strides=1,
+                        padding="same",
+                        use_bias=True,
+                        kernel_regularizer=l2(res_conv_w_reg),
+                        kernel_initializer=kernel_initializer
+                        )(merged)
+
+        res = Add()([x, input])
+        return res
+
+    cnn_shapes = []
     input_data = Input(name='the_input', shape=(None, input_dim))
 
     conv_1d = Conv1D(filters, 2,
                      strides=conv_stride,
                      padding=conv_border_mode,
                      use_bias=True,
+                     kernel_regularizer=l2(res_conv_w_reg),
+                     kernel_initializer=kernel_initializer,
                      name='initial_conv1d_layer')(input_data)
 
     cnn_shapes.append({"filter_size": 2, "border_mode": "valid",
                        "stride": conv_stride, "dilation": 1})
 
     res = conv_1d
-    for i in range(1, cnn_layer):
-        original = res
+    for i in range(res_stack):
+        for j in range(res_layers):
+            if i == 0:
+                continue
 
-        conv_1d = Conv1D(filters, 2,
-                         strides=conv_stride,
-                         padding="same",
-                         dilation_rate=2 ** i,
-                         use_bias=True,
-                         name='res_conv1d_layer{}'.format(i))(res)
-        sigmoid_actitvated = Activation("sigmoid")(conv_1d)
-        tanh_activated = Activation("tanh")(conv_1d)
+            res = res_dilatted_conv(res, dilation_rate=2 ** j)
 
-        merged = Multiply()([sigmoid_actitvated, tanh_activated])
-
-        padded = Conv1D(filters, 1, strides=1, padding="same",
-                        name='padding_layer_{}'.format(i))(merged)
-        
-        res = Add()([padded, original])
-
-        # maxout = maxout_function(res)
-        # maxout = maxout_function(conv_1d)
-        # if i == 0:
-        #     maxout = MaxPooling1D(pool_size=cnn_pool_size)(maxout)
-
-        cnn_shapes.append({"filter_size": 2, "border_mode": "same",
-                           "stride": conv_stride, "dilation": 2 ** i})
+            cnn_shapes.append({"filter_size": filter_size, "border_mode": "same",
+                               "stride": conv_stride, "dilation": 2 ** j})
 
     activated = Activation("relu")(res)
 
-    padded = Conv1D(filters, 1, strides=1, padding="same",
-                    name='padding_layer_', use_bias=True,)(activated)
-    activated = Activation("relu")(padded)
+    x = Conv1D(filters, 1, strides=1, padding="same",
+                    name='padding_layer', use_bias=True,
+                    kernel_regularizer=l2(res_conv_w_reg),
+                    kernel_initializer=kernel_initializer)(activated)
+    activated = Activation("relu")(x)
 
     cnn_shapes.append({"filter_size": 1, "border_mode": "same",
                        "stride": conv_stride, "dilation": 1})
 
     bn = activated
-    for i in range(rnn_layer):
+    for j in range(rnn_layer):
         bidir_rnn = Bidirectional(GRU(rnn_units, return_sequences=True,
                                       implementation=2,
-                                      name="bidirectional_rnn_layer{}".format(i),
+                                      name="bidirectional_rnn_layer{}".format(j),
                                       dropout=rnn_dropout,
                                       recurrent_dropout=rnn_recurrent_dropout
                                       ))(bn)
         bn = BatchNormalization()(bidir_rnn)
 
     time_dense = TimeDistributed(Dense(output_dim))(bn)
+    dropouted = Dropout(0.2)(time_dense)
     # TODO: Add softmax activation layer
-    y_pred = Activation('softmax', name='softmax')(time_dense)
+    y_pred = Activation('softmax', name='softmax')(dropouted)
     # Specify the model
     model = Model(inputs=input_data, outputs=y_pred)
     # TODO: Specify model.output_length
@@ -453,8 +474,8 @@ if __name__ == "__main__":
     # import function for training acoustic model
     from train_utils import train_model
 
-    model_end = final_model_1(input_dim=161, cnn_layer=3, filters=256, kernel_size=11, conv_stride=1,
-                            conv_border_mode='valid', cnn_pool_size=2,
+    model_end = final_model_3(input_dim=161, res_layers=4, res_stack=2, filters=256,
+                            conv_border_mode='valid',
                             rnn_layer=1, rnn_units=200, rnn_dropout=0.3, rnn_recurrent_dropout=0.3,
                             output_dim=29)
     train_model(input_to_softmax=model_end,
