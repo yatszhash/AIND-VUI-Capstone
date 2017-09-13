@@ -334,7 +334,7 @@ def final_model_2(input_dim, cnn_layer, filters, kernel_size, conv_stride,
     activated = Activation("relu")(res)
 
     padded = Conv1D(filters, 1, strides=1, padding="same",
-                    name='padding_layer_', use_bias=True,)(activated)
+                    use_bias=True,)(activated)
     activated = Activation("relu")(padded)
 
     cnn_shapes.append({"filter_size": 1, "border_mode": "same",
@@ -369,7 +369,7 @@ def final_model_3(input_dim, res_layers, res_stack, filters, conv_border_mode,
     """ Build a deep network for speech
     """
     filter_size = 2
-    res_conv_w_reg = 1e-7
+    res_conv_w_reg = 1e-6
     conv_stride = 1
     kernel_initializer = "he_normal"
 
@@ -428,8 +428,7 @@ def final_model_3(input_dim, res_layers, res_stack, filters, conv_border_mode,
 
     activated = Activation("relu")(res)
 
-    x = Conv1D(filters, 1, strides=1, padding="same",
-                    name='padding_layer', use_bias=True,
+    x = Conv1D(filters, 1, strides=1, padding="same", use_bias=True,
                     kernel_regularizer=l2(res_conv_w_reg),
                     kernel_initializer=kernel_initializer)(activated)
     activated = Activation("relu")(x)
@@ -461,6 +460,95 @@ def final_model_3(input_dim, res_layers, res_stack, filters, conv_border_mode,
     print(model.summary())
     return model
 
+def final_model_4(input_dim, res_layers, res_stack, filters, conv_border_mode,
+                  output_dim=29):
+    """ Build a deep network for speech
+    """
+    filter_size = 2
+    res_conv_w_reg = 1e-6
+    conv_stride = 1
+    kernel_initializer = "he_normal"
+
+    def res_dilatted_conv(input, dilation_rate):
+
+        conv_1d = Conv1D(filters, filter_size,
+                         strides=conv_stride,
+                         padding="same",
+                         dilation_rate=dilation_rate,
+                         use_bias=True,
+                         kernel_initializer=kernel_initializer,
+                         kernel_regularizer=l2(res_conv_w_reg)
+                         #name="dilation({})_conv_in_res".format(dilation_rate)
+                         )(input)
+        sigmoid_actitvated = Activation("sigmoid")(conv_1d)
+        tanh_activated = Activation("tanh")(conv_1d)
+
+        merged = Multiply()([sigmoid_actitvated, tanh_activated])
+
+        x = Conv1D(filters,
+                        1,
+                        strides=1,
+                        padding="same",
+                        use_bias=True,
+                        kernel_regularizer=l2(res_conv_w_reg),
+                        kernel_initializer=kernel_initializer
+                        )(merged)
+
+        res = Add()([x, input])
+        return res
+
+    cnn_shapes = []
+    input_data = Input(name='the_input', shape=(None, input_dim))
+
+    conv_1d = Conv1D(filters, 2,
+                     strides=conv_stride,
+                     padding=conv_border_mode,
+                     use_bias=True,
+                     kernel_regularizer=l2(res_conv_w_reg),
+                     kernel_initializer=kernel_initializer,
+                     name='initial_conv1d_layer')(input_data)
+
+    cnn_shapes.append({"filter_size": 2, "border_mode": "valid",
+                       "stride": conv_stride, "dilation": 1})
+
+    res = conv_1d
+    for i in range(res_stack):
+        for j in range(res_layers):
+            if i == 0:
+                continue
+
+            res = res_dilatted_conv(res, dilation_rate=2 ** j)
+
+            cnn_shapes.append({"filter_size": filter_size, "border_mode": "same",
+                               "stride": conv_stride, "dilation": 2 ** j})
+
+    activated = Activation("relu")(res)
+
+    x = Conv1D(output_dim, 1, strides=1, padding="same", use_bias=True,
+                    kernel_regularizer=l2(res_conv_w_reg),
+                    kernel_initializer=kernel_initializer)(activated)
+    activated = Activation("relu")(x)
+    cnn_shapes.append({"filter_size": 1, "border_mode": "same",
+                       "stride": conv_stride, "dilation": 1})
+
+    x = Conv1D(output_dim, 1, strides=1, padding="same", use_bias=True,
+               kernel_regularizer=l2(res_conv_w_reg),
+               kernel_initializer=kernel_initializer)(activated)
+    cnn_shapes.append({"filter_size": 1, "border_mode": "same",
+                       "stride": conv_stride, "dilation": 1})
+
+    # TODO: Add softmax activation layer
+    y_pred = Activation('softmax', name='softmax')(x)
+    # Specify the model
+    model = Model(inputs=input_data, outputs=y_pred)
+    # TODO: Specify model.output_length
+    #model.output_length = lambda x: cnn_output_length(
+    #    x, cnn_shapes[0]["filter_size"], cnn_shapes[0]["border_mode"], cnn_shapes[0]["stride"],
+    #    dilation=cnn_shapes[0]["dilation"])
+    model.output_length = lambda x: multi_layer_cnn_output_length(x, cnn_shapes)
+    print(model.summary())
+    return model
+
 # for debug
 if __name__ == "__main__":
     from keras.backend.tensorflow_backend import set_session
@@ -474,10 +562,13 @@ if __name__ == "__main__":
     # import function for training acoustic model
     from train_utils import train_model
 
-    model_end = final_model_3(input_dim=161, res_layers=4, res_stack=2, filters=256,
-                            conv_border_mode='valid',
-                            rnn_layer=1, rnn_units=200, rnn_dropout=0.3, rnn_recurrent_dropout=0.3,
-                            output_dim=29)
+    # model_end = final_model_3(input_dim=161, res_layers=4, res_stack=2, filters=256,
+    #                         conv_border_mode='valid',
+    #                         rnn_layer=1, rnn_units=200, rnn_dropout=0.3, rnn_recurrent_dropout=0.3,
+    #                         output_dim=29)
+    model_end = final_model_4(input_dim=161, res_layers=4, res_stack=2, filters=256,
+                            conv_border_mode='valid',output_dim=29)
+
     train_model(input_to_softmax=model_end,
                 pickle_path='model_end.pickle',
                 save_model_path='model_end.h5',
