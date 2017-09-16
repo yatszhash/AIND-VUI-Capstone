@@ -418,7 +418,7 @@ def final_model_3(input_dim, res_layers, res_stack, filters, conv_border_mode,
     res = conv_1d
     for i in range(res_stack):
         for j in range(res_layers):
-            if i == 0:
+            if i == 0 and j == 0:
                 continue
 
             res = res_dilatted_conv(res, dilation_rate=2 ** j)
@@ -447,9 +447,9 @@ def final_model_3(input_dim, res_layers, res_stack, filters, conv_border_mode,
         bn = BatchNormalization()(bidir_rnn)
 
     time_dense = TimeDistributed(Dense(output_dim))(bn)
-    dropouted = Dropout(0.2)(time_dense)
+    #dropouted = Dropout(0.2)(time_dense)
     # TODO: Add softmax activation layer
-    y_pred = Activation('softmax', name='softmax')(dropouted)
+    y_pred = Activation('softmax', name='softmax')(time_dense)
     # Specify the model
     model = Model(inputs=input_data, outputs=y_pred)
     # TODO: Specify model.output_length
