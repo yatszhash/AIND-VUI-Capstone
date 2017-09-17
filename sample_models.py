@@ -2,7 +2,7 @@ from keras import backend as K
 from keras.models import Model
 from keras.layers import (BatchNormalization, Conv1D, Dense, Input,
                           TimeDistributed, Activation, Bidirectional, SimpleRNN, GRU, LSTM, Merge, MaxPooling1D,
-                          Maximum, Add, Multiply, ZeroPadding3D, Dropout)
+                          Maximum, Add, Multiply, ZeroPadding3D, Dropout, Conv2D)
 from keras.regularizers import l2
 
 
@@ -368,7 +368,7 @@ def final_model_3(input_dim, res_layers, res_stack, filters, conv_border_mode,
                   output_dim=29):
     """ Build a deep network for speech
     """
-    filter_size = 2
+    filter_size = 3
     res_conv_w_reg = 1e-6
     conv_stride = 1
     kernel_initializer = "he_normal"
@@ -412,7 +412,7 @@ def final_model_3(input_dim, res_layers, res_stack, filters, conv_border_mode,
                      kernel_initializer=kernel_initializer,
                      name='initial_conv1d_layer')(input_data)
 
-    cnn_shapes.append({"filter_size": 2, "border_mode": "valid",
+    cnn_shapes.append({"filter_size": filter_size, "border_mode": "valid",
                        "stride": conv_stride, "dilation": 1})
 
     res = conv_1d
@@ -427,11 +427,6 @@ def final_model_3(input_dim, res_layers, res_stack, filters, conv_border_mode,
                                "stride": conv_stride, "dilation": 2 ** j})
 
     activated = Activation("relu")(res)
-
-    x = Conv1D(filters, 1, strides=1, padding="same", use_bias=True,
-                    kernel_regularizer=l2(res_conv_w_reg),
-                    kernel_initializer=kernel_initializer)(activated)
-    activated = Activation("relu")(x)
 
     cnn_shapes.append({"filter_size": 1, "border_mode": "same",
                        "stride": conv_stride, "dilation": 1})
@@ -500,18 +495,7 @@ def final_model_4(input_dim, res_layers, res_stack, filters, conv_border_mode,
     cnn_shapes = []
     input_data = Input(name='the_input', shape=(None, input_dim))
 
-    conv_1d = Conv1D(filters, 2,
-                     strides=conv_stride,
-                     padding=conv_border_mode,
-                     use_bias=True,
-                     kernel_regularizer=l2(res_conv_w_reg),
-                     kernel_initializer=kernel_initializer,
-                     name='initial_conv1d_layer')(input_data)
-
-    cnn_shapes.append({"filter_size": 2, "border_mode": "valid",
-                       "stride": conv_stride, "dilation": 1})
-
-    res = conv_1d
+    res = input_data
     for i in range(res_stack):
         for j in range(res_layers):
             if i == 0:
@@ -628,6 +612,93 @@ def final_model_7(input_dim, cnn_layer, filters, kernel_size, conv_stride,
     print(model.summary())
     return model
 
+def final_model_8(input_dim, res_layers, num_res_stack,
+                  rnn_layer, rnn_units, rnn_dropout, rnn_recurrent_dropout,
+                  output_dim=29):
+    """ Build a deep network for speech
+    """
+    filter_size = 2
+    filters_unit = 128
+    res_conv_w_reg = 1e-6
+    conv_stride = 1
+    kernel_initializer = "he_normal"
+
+    def res_stack(input, filters, res_layers):
+        x = input
+        for j in range(res_layers):
+            conv_1d = Conv1D(filters, filter_size,
+                             strides=conv_stride,
+                             padding="same",
+                             use_bias=True,
+                             kernel_initializer=kernel_initializer,
+                             kernel_regularizer=l2(res_conv_w_reg)
+                             #name="dilation({})_conv_in_res".format(dilation_rate)
+                             )(x)
+            x = BatchNormalization()(conv_1d)
+            x  = Activation("relu")(x)
+
+        res = Add()([x, input])
+        return res
+
+    cnn_shapes = []
+    input_data = Input(name='the_input', shape=(None, input_dim))
+
+    filter_size = 128
+    #
+    # x = Conv1D(128, 3, strides=1, padding="same", use_bias=True,
+    #                 kernel_regularizer=l2(res_conv_w_reg),
+    #                 kernel_initializer=kernel_initializer)(input_data)
+
+    cnn_shapes.append({"filter_size": filter_size, "border_mode": "same",
+                       "stride": conv_stride, "dilation": 1})
+
+    res = input_data
+    for i in range(num_res_stack):
+        filters = filters_unit * (2 ** i)
+        conv_1d = Conv1D(filters, filter_size,
+                         strides=conv_stride,
+                         padding="same",
+                         use_bias=True,
+                         kernel_regularizer=l2(res_conv_w_reg),
+                         kernel_initializer=kernel_initializer,
+                         name='initial_res_stack_{}_layer'.format(i))(res)
+
+        cnn_shapes.append({"filter_size": filter_size, "border_mode": "same",
+                           "stride": conv_stride, "dilation": 1})
+
+        res = res_stack(conv_1d, filters, res_layers)
+
+        for _ in range(res_layers):
+            cnn_shapes.append({"filter_size": filter_size, "border_mode": "same",
+                           "stride": conv_stride, "dilation": 1})
+
+        x = BatchNormalization()(res)
+        x = Activation("relu")(x)
+
+    bn = x
+    for j in range(rnn_layer):
+        bidir_rnn = Bidirectional(GRU(rnn_units, return_sequences=True,
+                                      implementation=2,
+                                      name="bidirectional_rnn_layer{}".format(j),
+                                      dropout=rnn_dropout,
+                                      recurrent_dropout=rnn_recurrent_dropout
+                                      ))(bn)
+        bn = BatchNormalization()(bidir_rnn)
+
+    time_dense = TimeDistributed(Dense(output_dim))(bn)
+    # TODO: Add softmax activation layer
+    y_pred = Activation('softmax', name='softmax')(time_dense)
+    # Specify the model
+    model = Model(inputs=input_data, outputs=y_pred)
+    # TODO: Specify model.output_length
+    #model.output_length = lambda x: cnn_output_length(
+    #    x, cnn_shapes[0]["filter_size"], cnn_shapes[0]["border_mode"], cnn_shapes[0]["stride"],
+    #    dilation=cnn_shapes[0]["dilation"])
+    model.output_length = lambda x: multi_layer_cnn_output_length(x, cnn_shapes)
+    print(model.summary())
+    return model
+
+
 # for debug
 if __name__ == "__main__":
     from keras.backend.tensorflow_backend import set_session
@@ -645,12 +716,13 @@ if __name__ == "__main__":
     #                         conv_border_mode='valid',
     #                         rnn_layer=1, rnn_units=200, rnn_dropout=0.3, rnn_recurrent_dropout=0.3,
     #                         output_dim=29)
-    model_end = final_model_4(input_dim=161, res_layers=4, res_stack=2, filters=256,
-                            conv_border_mode='valid',output_dim=29)
+    model_end = final_model_8(input_dim=161, res_layers=3, num_res_stack=3,
+                                rnn_layer=1, rnn_units=256, rnn_dropout=0.3,
+                              rnn_recurrent_dropout=0.3, output_dim=29)
 
     train_model(input_to_softmax=model_end,
                 pickle_path='model_end.pickle',
                 save_model_path='model_end.h5',
-                minibatch_size=40,
+                minibatch_size=20,
                 epochs=20,
                 spectrogram=True)  # change to False if you would like to use MFCC features
