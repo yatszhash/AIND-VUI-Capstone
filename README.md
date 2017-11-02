@@ -1,6 +1,16 @@
-## This branch is my solution for the project.
+## This branch is my solution for the project "DNN Speech Recognizer" in Udacity Nanodegree.
+
+What is this project is described below by the udacity stuff .
+As he or she say, I only implemented sample_models.py and vui_notebook.ipynb in this project.
+In addition, there are some intermidiate files (eg. sample_models_back.py ) to create these files.
+So, if you are interested in what I do in this projecct, please see these files.
+If you are a udacity AI Nanodegree student, don't use for cheating.
+
+All the other codes from these are prepared by Udacity.
 
 =========================================================================
+
+
 [//]: # (Image References)
 
 [image1]: ./images/pipeline.png "ASR Pipeline"
